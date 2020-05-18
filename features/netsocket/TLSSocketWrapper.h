@@ -25,14 +25,20 @@
 #include "netsocket/Socket.h"
 #include "rtos/EventFlags.h"
 #include "platform/Callback.h"
+
+#ifdef USE_WOLFSSL_LIB
+#include "wolfssl/wolfcrypt/settings.h"
+#include "wolfssl/ssl.h"
+#else
 #include "mbedtls/platform.h"
 #include "mbedtls/ssl.h"
 #include "mbedtls/entropy.h"
 #include "mbedtls/ctr_drbg.h"
 #include "mbedtls/error.h"
+#endif
 
-// This class requires Mbed TLS SSL/TLS client code
-#if defined(MBEDTLS_SSL_CLI_C) || defined(DOXYGEN_ONLY)
+// This class requires TLS SSL/TLS client code
+#if defined(USE_WOLFSSL_LIB) || !defined(MBEDTLS_SSL_CLI_C) || defined(DOXYGEN_ONLY)
 
 /**
  * TLSSocket is a wrapper around Socket for interacting with TLS servers.
@@ -174,30 +180,44 @@ public:
     virtual nsapi_error_t listen(int backlog = 1);
     virtual nsapi_error_t getpeername(SocketAddress *address);
 
-#if defined(MBEDTLS_X509_CRT_PARSE_C) || defined(DOXYGEN_ONLY)
     /** Get own certificate directly from Mbed TLS.
      *
      * @return Internal Mbed TLS X509 structure.
      */
+#if defined(USE_WOLFSSL_LIB) || defined(DOXYGEN_ONLY)
+    WOLFSSL_X509 *get_own_cert();
+#elif defined(MBEDTLS_X509_CRT_PARSE_C)
     mbedtls_x509_crt *get_own_cert();
+#endif
 
     /** Set own certificate directly to Mbed TLS.
      *
      * @param crt Mbed TLS X509 certificate chain.
      * @return error code from mbedtls_ssl_conf_own_cert().
      */
+#if defined(USE_WOLFSSL_LIB) || defined(DOXYGEN_ONLY)
+    int set_own_cert(WOLFSSL_X509 *crt);
+#elif defined(MBEDTLS_X509_CRT_PARSE_C)
     int set_own_cert(mbedtls_x509_crt *crt);
+#endif
 
     /** Get CA chain structure.
      *
-     * @return Mbed TLS X509 certificate chain.
+     * @return wolfSSL X509 certificate chain.
      */
+#if defined(USE_WOLFSSL_LIB) || defined(DOXYGEN_ONLY)
+    WOLFSSL_X509 *get_ca_chain();
+#elif defined(MBEDTLS_X509_CRT_PARSE_C)
     mbedtls_x509_crt *get_ca_chain();
+#endif
 
-    /** Set CA chain directly to Mbed TLS.
+    /** Set CA chain directly to wolfSSL TLS.
      *
-     * @param crt Mbed TLS X509 certificate chain.
+     * @param crt wolfSSL X509 certificate chain.
      */
+#if defined(USE_WOLFSSL_LIB) || defined(DOXYGEN_ONLY)
+    void set_ca_chain(WOLFSSL_X509 *crt);
+#elif defined(MBEDTLS_X509_CRT_PARSE_C)
     void set_ca_chain(mbedtls_x509_crt *crt);
 #endif
 
@@ -205,19 +225,31 @@ public:
      *
      * @return Mbed TLS SSL config.
      */
+#ifdef USE_WOLFSSL_LIB
+    WOLFSSL_CTX *get_ssl_config();
+#else
     mbedtls_ssl_config *get_ssl_config();
+#endif
 
     /** Override Mbed TLS configuration.
      *
      * @param conf Mbed TLS SSL configuration structure.
      */
+#ifdef USE_WOLFSSL_LIB
+    void set_ssl_config(WOLFSSL_CTX *conf);
+#else
     void set_ssl_config(mbedtls_ssl_config *conf);
+#endif
 
     /** Get internal Mbed TLS context structure.
      *
      * @return SSL context.
      */
+#ifdef USE_WOLFSSL_LIB
+    WOLFSSL *get_ssl_context();
+#else
     mbedtls_ssl_context *get_ssl_context();
+#endif
 
 protected:
 #ifndef DOXYGEN_ONLY
@@ -257,49 +289,78 @@ private:
      */
     static void print_mbedtls_error(const char *name, int err);
 
-#if MBED_CONF_TLS_SOCKET_DEBUG_LEVEL > 0
     /**
      * Debug callback for Mbed TLS
      * Just prints on the USB serial port
      */
+#ifdef USE_WOLFSSL_LIB
+    #ifdef DEBUG_WOLFSSL
+    static void my_debug(const int logLevel, const char *const logMessage);
+    #endif
+#else
+    #if MBED_CONF_TLS_SOCKET_DEBUG_LEVEL > 0
     static void my_debug(void *ctx, int level, const char *file, int line,
                          const char *str);
+    #endif
+#endif
+
 
     /**
      * Certificate verification callback for Mbed TLS
      * Here we only use it to display information on each cert in the chain
      */
+#ifdef USE_WOLFSSL_LIB
+    static int my_verify(int preverify, WOLFSSL_X509_STORE_CTX* store);
+#else
+    #if MBED_CONF_TLS_SOCKET_DEBUG_LEVEL > 0
     static int my_verify(void *data, mbedtls_x509_crt *crt, int depth, uint32_t *flags);
-
-#endif /* MBED_CONF_TLS_SOCKET_DEBUG_LEVEL > 0 */
+    #endif
+#endif
 
     /**
      * Receive callback for Mbed TLS
      */
+#ifdef USE_WOLFSSL_LIB
+    static int ssl_recv(WOLFSSL *ssl, char *buf, int len, void *ctx);
+#else
     static int ssl_recv(void *ctx, unsigned char *buf, size_t len);
-
+#endif
     /**
      * Send callback for Mbed TLS
      */
+#ifdef USE_WOLFSSL_LIB
+    static int ssl_send(WOLFSSL *ssl, char *buf, int len, void *ctx);
+#else
     static int ssl_send(void *ctx, const unsigned char *buf, size_t len);
-
-    mbedtls_ssl_context _ssl;
-#ifdef MBEDTLS_X509_CRT_PARSE_C
-    mbedtls_pk_context _pkctx;
 #endif
+
+#ifdef USE_WOLFSSL_LIB
+    WOLFSSL* _ssl;
+#else
+    mbedtls_ssl_context _ssl;
+    #if defined(MBEDTLS_X509_CRT_PARSE_C)
+    mbedtls_pk_context _pkctx;
+    #endif
     mbedtls_ctr_drbg_context _ctr_drbg;
     mbedtls_entropy_context _entropy;
+#endif
 
     rtos::EventFlags _event_flag;
     mbed::Callback<void()> _sigio;
     Socket *_transport;
     int _timeout;
 
-#ifdef MBEDTLS_X509_CRT_PARSE_C
+#ifdef USE_WOLFSSL_LIB
+    WOLFSSL_CTX* _ssl_conf;
+    WOLFSSL_X509 *_cacert;
+    WOLFSSL_X509 *_clicert;
+#else
+    mbedtls_ssl_config *_ssl_conf;
+    #if defined(MBEDTLS_X509_CRT_PARSE_C)
     mbedtls_x509_crt *_cacert;
     mbedtls_x509_crt *_clicert;
+    #endif
 #endif
-    mbedtls_ssl_config *_ssl_conf;
 
     bool _connect_transport: 1;
     bool _close_transport: 1;

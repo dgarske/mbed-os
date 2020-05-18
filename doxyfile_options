@@ -843,6 +843,7 @@ EXCLUDE_PATTERNS       = */tools/* \
                          */cmsis/* \
                          */features/cryptocell/* \
                          */features/mbedtls/* \
+                         */features/wolf/wolfssl/* \
                          */features/unsupported/* \
                          */features/lwipstack/* \
                          */features/nanostack/sal-stack-nanostack/* \

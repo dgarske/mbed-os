@@ -30,10 +30,15 @@ SPDX-License-Identifier: BSD-3-Clause
 #ifndef MBED_LORAWAN_MAC_LORAMAC_CRYPTO_H__
 #define MBED_LORAWAN_MAC_LORAMAC_CRYPTO_H__
 
+#ifdef USE_WOLFSSL_LIB
+#include "wolfssl/wolfcrypt/settings.h"
+#include "wolfssl/wolfcrypt/aes.h"
+#include "wolfssl/wolfcrypt/cmac.h"
+#else
 #include "mbedtls/config.h"
 #include "mbedtls/aes.h"
 #include "mbedtls/cmac.h"
-
+#endif
 
 class LoRaMacCrypto {
 public:
@@ -155,12 +160,20 @@ private:
     /**
      * AES computation context variable
      */
+#ifdef USE_WOLFSSL_LIB
+    Aes aes_ctx;
+#else
     mbedtls_aes_context aes_ctx;
+#endif
 
     /**
      * CMAC computation context variable
      */
+#ifdef USE_WOLFSSL_LIB
+    Cmac aes_cmac_ctx[1];
+#else
     mbedtls_cipher_context_t aes_cmac_ctx[1];
+#endif
 };
 
 #endif // MBED_LORAWAN_MAC_LORAMAC_CRYPTO_H__

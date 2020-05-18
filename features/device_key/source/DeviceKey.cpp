@@ -17,9 +17,16 @@
 #include "DeviceKey.h"
 
 #if DEVICEKEY_ENABLED
+#ifdef USE_WOLFSSL_LIB
+#include "wolfssl/wolfcrypt/settings.h"
+#include "wolfssl/wolfcrypt/cmac.h"
+#include "wolfssl/wolfcrypt/random.h"
+#else
 #include "mbedtls/config.h"
 #include "mbedtls/cmac.h"
 #include "mbedtls/platform.h"
+#include "entropy.h"
+#endif
 #include "features/storage/kvstore/include/KVStore.h"
 #include "features/storage/kvstore/tdbstore/TDBStore.h"
 #include "features/storage/kvstore/kv_map/KVMap.h"
@@ -28,7 +35,6 @@
 #include <stdlib.h>
 #include "platform/mbed_error.h"
 #include <string.h>
-#include "entropy.h"
 #include "mbed_trace.h"
 
 #define TRACE_GROUP "DEVKEY"
@@ -191,12 +197,55 @@ int DeviceKey::get_derived_key(uint32_t *ikey_buff, size_t ikey_size, const unsi
     int ret;
     size_t counter = 0;
     char separator = 0x00;
+#ifdef USE_WOLFSSL_LIB
+    Cmac ctx;
+#else
     mbedtls_cipher_context_t ctx;
+#endif
     unsigned char output_len_enc[ 4 ] = {0};
     unsigned char counter_enc[ 1 ] = {0};
 
     DEVKEY_WRITE_UINT32_LE(output_len_enc, ikey_type);
 
+#ifdef USE_WOLFSSL_LIB
+    do {
+        word32 tagSz;
+        ret = wc_InitCmac(&ctx, (unsigned char *)ikey_buff, ikey_size, WC_CMAC_AES, NULL);
+        if (ret != 0) {
+            goto finish;
+        }
+        
+        DEVKEY_WRITE_UINT8_LE(counter_enc, (counter + 1));
+
+        ret = wc_CmacUpdate(&ctx, (unsigned char *)counter_enc, sizeof(counter_enc));
+        if (ret != 0) {
+            goto finish;
+        }
+        ret = wc_CmacUpdate(&ctx, isalt, isalt_size);
+        if (ret != 0) {
+            goto finish;
+        }
+        ret = wc_CmacUpdate(&ctx, (unsigned char *)&separator, sizeof(char));
+        if (ret != 0) {
+            goto finish;
+        }
+        ret = wc_CmacUpdate(&ctx, (unsigned char *)&output_len_enc, sizeof(output_len_enc));
+        if (ret != 0) {
+            goto finish;
+        }
+        tagSz = DEVICE_KEY_16BYTE;
+        ret = wc_CmacFinal(&ctx, output + (DEVICE_KEY_16BYTE * (counter)), &tagSz);
+        if (ret != 0) {
+            goto finish;
+        }
+        counter++;
+    } while (DEVICE_KEY_16BYTE * counter < ikey_type);
+
+finish:
+    if (0 != ret) {
+        return DEVICEKEY_ERR_CMAC_GENERIC_FAILURE;
+    }
+#else
     mbedtls_cipher_type_t mbedtls_cipher_type = MBEDTLS_CIPHER_AES_128_ECB;
     if (DEVICE_KEY_32BYTE == ikey_size) {
         mbedtls_cipher_type = MBEDTLS_CIPHER_AES_256_ECB;
@@ -255,6 +304,7 @@ finish:
         mbedtls_cipher_free(&ctx);
         return DEVICEKEY_ERR_CMAC_GENERIC_FAILURE;
     }
+#endif /* USE_WOLFSSL_LIB */
 
     return DEVICEKEY_SUCCESS;
 }
@@ -269,7 +319,20 @@ int DeviceKey::generate_key_by_random(uint32_t *output, size_t size)
         return DEVICEKEY_INVALID_PARAM;
     }
 
-#if defined(DEVICE_TRNG) || defined(MBEDTLS_ENTROPY_NV_SEED) || defined(MBEDTLS_ENTROPY_HARDWARE_ALT)
+#ifdef USE_WOLFSSL_LIB
+    WC_RNG entropy;
+    ret = wc_InitRng(&entropy);
+    if (ret == 0) {
+        ret = wc_RNG_GenerateBlock(&entropy, (unsigned char *)output, size);
+        wc_FreeRng(&entropy);
+    }
+
+    if (ret != 0) {
+        ret = DEVICEKEY_GENERATE_RANDOM_ERROR;
+    } else {
+        ret = DEVICEKEY_SUCCESS;
+    }
+#elif defined(DEVICE_TRNG) || defined(MBEDTLS_ENTROPY_NV_SEED) || defined(MBEDTLS_ENTROPY_HARDWARE_ALT)
     mbedtls_entropy_context *entropy = new mbedtls_entropy_context;
     mbedtls_entropy_init(entropy);
     memset(output, 0, size);
@@ -283,7 +346,6 @@ int DeviceKey::generate_key_by_random(uint32_t *output, size_t size)
 
     mbedtls_entropy_free(entropy);
     delete entropy;
-
 #endif
 
     return ret;

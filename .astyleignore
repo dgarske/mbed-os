@@ -13,6 +13,7 @@
 ^features/lwipstack/lwip
 ^features/lwipstack/lwip-sys
 ^features/mbedtls
+^features/wolf
 ^features/nanostack/coap-service
 ^features/nanostack/sal-stack-nanostack
 ^features/nanostack/targets

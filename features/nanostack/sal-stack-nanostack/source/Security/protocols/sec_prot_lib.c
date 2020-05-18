@@ -38,7 +38,13 @@
 #include "Service_Libs/ieee_802_11/ieee_802_11.h"
 #include "Service_Libs/hmac/hmac_sha1.h"
 #include "Service_Libs/nist_aes_kw/nist_aes_kw.h"
+
+#ifdef USE_WOLFSSL_LIB
+#include "wolfssl/wolfcrypt/settings.h"
+#include "wolfssl/wolfcrypt/sha256.h"
+#else
 #include "mbedtls/sha256.h"
+#endif
 
 #ifdef HAVE_WS
 
@@ -489,6 +495,19 @@ int8_t sec_prot_lib_gtkhash_generate(uint8_t *gtk, uint8_t *gtk_hash)
 {
     int8_t ret_val = 0;
 
+#ifdef USE_WOLFSSL_LIB
+    wc_Sha256 ctx;
+    wc_InitSha256(&ctx);
+    if (wc_Sha256Update(&ctx, gtk, 16) != 0) {
+        ret_val = -1;
+        goto error;
+    }
+    uint8_t output[32];
+    if (wc_Sha256Final(&ctx, output) != 0) {
+        ret_val = -1;
+        goto error;
+    }
+#else
     mbedtls_sha256_context ctx;
 
     mbedtls_sha256_init(&ctx);
@@ -509,12 +528,16 @@ int8_t sec_prot_lib_gtkhash_generate(uint8_t *gtk, uint8_t *gtk_hash)
         ret_val = -1;
         goto error;
     }
+#endif
 
     memcpy(gtk_hash, &output[24], 8);
 
 error:
+#ifdef USE_WOLFSSL_LIB
+    wc_Sha256Free(&ctx);
+#else
     mbedtls_sha256_free(&ctx);
-
+#endif
     return ret_val;
 }
 
